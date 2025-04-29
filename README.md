@@ -1,5 +1,5 @@
 This project implements a Cuckoo Filter, inspired by the paper 'Cuckoo Filter: Practically Better Than Bloom' (Bin Fan, David G. Andersen, Michael Kaminsky, CoNEXT 2014).
-
+https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf
 - adavantage:
     - support add and remove item dynamically
     - higher lookup perfromance than traditional bloom, even in 95% full
