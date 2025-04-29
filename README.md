@@ -1,0 +1,52 @@
+This project implements a Cuckoo Filter, inspired by the paper 'Cuckoo Filter: Practically Better Than Bloom' (Bin Fan, David G. Andersen, Michael Kaminsky, CoNEXT 2014).
+
+- adavantage:
+    - support add and remove item dynamically
+    - higher lookup perfromance than traditional bloom, even in 95% full
+    - easier to implement than other bloom filter varian that support deletion
+    - use less space than bloom when FPR required <3%>
+- cuckoo filter is variant of cuckoo hash table
+- cuckoo hash table:
+    - use 2 or more hash function
+    - each key can be placed in 1 out of 2 possible locations
+        - locations calcultaed using hash function
+    - when insert:
+        - if both location full, kick out existing key from 1 of the location
+            - each bucket may hold>1 key
+        - evicted key then insert into another location
+        - may cause chain eviction. ( like cuckoo bird kick out eggs )
+            - until vacant bucket found, or when maximum is reached
+            - if no vacant, hash table can be considered as too full
+        - average insertion time is O(1)
+    - advantage
+        - high load factor (90%) before performance degrade
+            - by refines earlier item placement decisions
+        - fast lookup: need only check 2 place
+        - simple and predictable perfromance, at most 2 lookup
+    - when lookup:
+        - compute key from hash function
+        - go to the 2 buckets and compare the full key
+- Fingerprint size determined by target False Positive Rate (FPR) 
+    - smaller FPR need longer fingerprint size
+    - minimum fingerprin size used grow logarithmically with number of entries in table
+        - so per item overhead higher for large table (> billion), but with lower FPR
+    - for < billion, cuckoo use less space & support deletion than bloom filter, ( when FPR < 3%)
+- cuckoo filter only store fingerprint, not full key
+    - so cannot perform standard cuckoo hashing to insert new item
+- when insert:
+    - use partial-key cuckoo hashing to derive item's alternate location based on fingerprint
+        - f = fingerprint(x)
+        - h1(x) = hash(x)
+        - h2(x) = h1(x) ⊕ hash(fingerprint)
+    - the use of XOR (⊕), ensure that h1(x) can be caluclate from h2(x)
+        - h1(x) = h2(x) ⊕ hash(fingerprint)
+        - XOR is self-inverse!
+    - fingerprint is hashed before XOR to help distribute item uniformly
+        - if not hashed, as the fingerprint is usualy small ( as we need to save it in bucket), when we XOR it with h1(x), only last few bits change and h2(x) will be very close to h1(x), which may expect more collisions
+- when lookup
+    - compute f=fingerprint(x)
+    - calculate h1(x) and h2(x), if either f in either, then return true
+    - ensure no false negative as long as no bucket overflow
+- when delete:
+    - 
+
