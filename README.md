@@ -48,5 +48,14 @@ https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf
     - calculate h1(x) and h2(x), if either f in either, then return true
     - ensure no false negative as long as no bucket overflow
 - when delete:
-    - 
+    - check if h1(x) or h2(x) bucket with fingerprint
+    - remove fingerprint from bucket
+    - no Flase deletion
+        - f(y)==f(x), and ha(y)==ha(x), then must be hb(y)==hb(x)
+        - so if we want to remove x, it can be removed from ha or hb
+        - and the other will be ther for y
+        - but FPR unchanged after remove, as loookup(x) will be still true
+        - expected FP that bounded by FPR
+
+
 
