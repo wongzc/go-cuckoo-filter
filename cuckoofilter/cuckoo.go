@@ -5,17 +5,16 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math"
 	"math/rand"
 )
 
 type Cuckoo struct {
-	buckets            []bucket
-	num_bucket         uint
-	bucket_size        uint
-	fingerprint_length uint
-	max_retries        int
+	buckets           []bucket
+	bucketCount       uint
+	bucketSize        uint
+	fingerPrintLength uint
+	maxRetries        int
 }
 
 type bucket []fingerprint
@@ -39,9 +38,8 @@ func (b bucket) contains(f fingerprint) (int, bool) {
 	return -1, false
 }
 
-func fingerprintLength(b uint, e float64) uint {
-	f := uint(math.Ceil(math.Log(2 * float64(b) / e)))
-	f /= 8
+func fingerprintLength(bucketSize uint, accuracy float64) uint {
+	f := uint(math.Ceil(math.Log(2 * float64(bucketSize) / accuracy)))
 	if f < 1 {
 		return 1
 	}
@@ -62,27 +60,26 @@ func nextPower(i uint) uint {
 
 var hasher = sha1.New()
 
-func New(n uint, fp float64) *Cuckoo {
-	b := uint(4)
-	f := fingerprintLength(b, fp)
-	num_bucket := nextPower(n / f * 8)
-	fmt.Println(num_bucket, b, f)
-	buckets := make([]bucket, num_bucket)
-	for i := uint(0); i < num_bucket; i++ {
-		buckets[i] = make(bucket, b)
+func New(itemCount uint, accuracy float64) *Cuckoo {
+	bucketSize := uint(4)
+	f := fingerprintLength(bucketSize, accuracy)
+	bucketCount := nextPower(itemCount / f * 8)
+	buckets := make([]bucket, bucketCount)
+	for i := uint(0); i < bucketCount; i++ {
+		buckets[i] = make(bucket, bucketSize)
 	}
 	return &Cuckoo{
-		buckets:            buckets,
-		num_bucket:         num_bucket,
-		bucket_size:        b,
-		fingerprint_length: f,
-		max_retries:        int(10*math.Log2(float64(n))) + 1,
+		buckets:           buckets,
+		bucketCount:       bucketCount,
+		bucketSize:        bucketSize,
+		fingerPrintLength: f,
+		maxRetries:        int(10*math.Log2(float64(itemCount))) + 1,
 	}
 }
 
 func (c *Cuckoo) hashes(data string) (uint, uint, fingerprint) {
 	h := hash([]byte(data))
-	f := h[0:c.fingerprint_length]
+	f := h[0:c.fingerPrintLength]
 	i1 := uint(binary.BigEndian.Uint32(h))
 	i2 := i1 ^ uint(binary.BigEndian.Uint32(hash(f)))
 	return i1, i2, fingerprint(f)
@@ -97,25 +94,25 @@ func hash(data []byte) []byte {
 
 func (c *Cuckoo) Set(data string) {
 	i1, i2, f := c.hashes(data)
-	b1 := c.buckets[i1%c.num_bucket]
+	b1 := c.buckets[i1%c.bucketCount]
 	if i, err := b1.nextIndex(); err == nil {
 		b1[i] = f
 		return
 	}
 
-	b2 := c.buckets[i2%c.num_bucket]
+	b2 := c.buckets[i2%c.bucketCount]
 	if i, err := b2.nextIndex(); err == nil {
 		b2[i] = f
 		return
 	}
 
 	i := i1
-	for r := 0; r < c.max_retries; r++ {
-		index := i % c.num_bucket
-		entryIndex := rand.Intn(int(c.bucket_size))
+	for r := 0; r < c.maxRetries; r++ {
+		index := i % c.bucketCount
+		entryIndex := rand.Intn(int(c.bucketSize))
 		f, c.buckets[index][entryIndex] = c.buckets[index][entryIndex], f
 		i = i ^ uint(binary.BigEndian.Uint32(hash(f)))
-		b := c.buckets[i%c.num_bucket]
+		b := c.buckets[i%c.bucketCount]
 		if idx, err := b.nextIndex(); err == nil {
 			b[idx] = f
 			return
@@ -126,13 +123,13 @@ func (c *Cuckoo) Set(data string) {
 
 func (c *Cuckoo) Del(needle string) {
 	i1, i2, f := c.hashes(needle)
-	b1 := c.buckets[i1%c.num_bucket]
+	b1 := c.buckets[i1%c.bucketCount]
 	if ind, ok := b1.contains(f); ok {
 		b1[ind] = nil
 		return
 	}
 
-	b2 := c.buckets[i2%c.num_bucket]
+	b2 := c.buckets[i2%c.bucketCount]
 	if ind, ok := b2.contains(f); ok {
 		b2[ind] = nil
 		return
@@ -141,7 +138,7 @@ func (c *Cuckoo) Del(needle string) {
 
 func (c *Cuckoo) Get(needle string) bool {
 	i1, i2, f := c.hashes(needle)
-	_, b1 := c.buckets[i1%c.num_bucket].contains(f)
-	_, b2 := c.buckets[i2%c.num_bucket].contains(f)
+	_, b1 := c.buckets[i1%c.bucketCount].contains(f)
+	_, b2 := c.buckets[i2%c.bucketCount].contains(f)
 	return b1 || b2
 }

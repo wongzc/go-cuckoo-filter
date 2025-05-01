@@ -57,5 +57,33 @@ https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf
         - but FPR unchanged after remove, as loookup(x) will be still true
         - expected FP that bounded by FPR
 
+- formula
+### Bucket Size  
+$$
+b =2,4,8
+$$  
+- smaller: faster lookup ( speed)
+- larger: higher load factor (space)
 
+### Minimum Fingerprint Length
+$$
+f = \left\lceil \log_2 (\frac{2b}{\varepsilon})\right\rceil
+$$
 
+- `ε`: false positive rate
+- `b`: bucket size
+
+### Number of Bucket
+$$
+m= \left\lceil \frac{n}{\alpha \cdot b} \right\rceil
+$$
+- `n`: number of items
+- `α`: Load factor
+- `b`: bucket size
+- usually round up to power of 2 for fast modulo operatios using bit mask
+
+### Retry Limit
+$$
+\text{max\_retries}=10\times\log_2(n)
+$$
+- `n`: number of items
