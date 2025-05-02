@@ -3,6 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)  
 This project implements a [Cuckoo Filter](https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf), inspired by the paper *"Cuckoo Filter: Practically Better Than Bloom"* by Bin Fan, David G. Andersen, and Michael Kaminsky (CoNEXT 2014).
 
+## Installation
+
+```bash
+go get github.com/wongzc/go-cuckoo-filter/cuckoofilter
+```
+
 ## What is a Cuckoo Filter?
 
 A Cuckoo Filter is a probabilistic data structure used for set membership tests, similar to a Bloom Filter—but with added support for deletions, better lookup performance, and improved space efficiency when the desired false positive rate (FPR) is under 3%.
