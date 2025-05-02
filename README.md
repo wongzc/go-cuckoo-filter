@@ -78,9 +78,9 @@ $$
 - Round `m` up to the next power of 2 for fast modulo operations using bit masking.
 
 ### Maximum Retry Limit
-$$
+```math
 \text{max\_retries}=10\cdot\log_2(n)
-$$
+```
 - `n`: number of items
 - Used to cap the number of relocation attempts during insertion.
 
