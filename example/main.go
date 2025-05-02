@@ -10,7 +10,18 @@ import (
 
 func main() {
 	reader := bufio.NewReader(os.Stdin)
-	c := cuckoofilter.New(10, 0.1)
+	var item_count uint64
+	var accuracy float64
+	var bucketSize uint64
+	fmt.Println("Enter estimated item count (integer), acceptable false positive rate (0<x<1), bucket size (1,2,4,8)")
+	_, err := fmt.Scan(&item_count, &accuracy, &bucketSize)
+	if err != nil || accuracy <= 0 || accuracy >= 1 || bucketSize !=2 && bucketSize!=4 && bucketSize!=8 && bucketSize!=1{
+		fmt.Println("Invalid input")
+		return
+	}
+	c := cuckoofilter.New(item_count, accuracy, bucketSize)
+
+	fmt.Printf("Using %d buckets (size: %d). Fingerprint length: %d. Max retries: %d.\n", c.BucketCount, c.BucketSize, c.FingerPrintLength, c.MaxRetries)
 	for {
 		fmt.Print("[s=set, g=get, d=delete, x=exit]: ")
 		cmd, _ := reader.ReadString('\n')
@@ -31,7 +42,7 @@ func main() {
 				}
 			} else {
 				c.Del(str)
-				fmt.Printf("Deleted %s from filter.", str)
+				fmt.Printf("Deleted %s from filter.\n", str)
 			}
 		}
 	}

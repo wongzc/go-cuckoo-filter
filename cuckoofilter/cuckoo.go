@@ -11,10 +11,10 @@ import (
 
 type Cuckoo struct {
 	buckets           []bucket
-	bucketCount       uint
-	bucketSize        uint
-	fingerPrintLength uint
-	maxRetries        int
+	BucketCount       uint64
+	BucketSize        uint64
+	FingerPrintLength uint64
+	MaxRetries        int
 }
 
 type bucket []fingerprint
@@ -38,15 +38,11 @@ func (b bucket) contains(f fingerprint) (int, bool) {
 	return -1, false
 }
 
-func fingerprintLength(bucketSize uint, accuracy float64) uint {
-	f := uint(math.Ceil(math.Log(2 * float64(bucketSize) / accuracy)))
-	if f < 1 {
+func nextPower(i uint64) uint64 {
+	// get min power of 2 that is larger, to use bitwise masking
+	if i==0 {
 		return 1
 	}
-	return f
-}
-
-func nextPower(i uint) uint {
 	i--
 	i |= i >> 1
 	i |= i >> 2
@@ -60,28 +56,42 @@ func nextPower(i uint) uint {
 
 var hasher = sha1.New()
 
-func New(itemCount uint, accuracy float64) *Cuckoo {
-	bucketSize := uint(4)
-	f := fingerprintLength(bucketSize, accuracy)
-	bucketCount := nextPower(itemCount / f * 8)
+func New(itemCount uint64, accuracy float64, bucketSize uint64) *Cuckoo {
+	maxLoadFactor := map[uint64]uint64{
+		1: 50,
+		2: 84,
+		4: 95,
+		8: 98,
+	} // max load factor under each bucket size by Fan et al.
+	lf,ok := maxLoadFactor[bucketSize]
+	if !ok {
+		panic("unsupported bucket size, use 1, 2, 4, or 8")
+	}
+	fingerPrintLength := uint64(math.Ceil(math.Log(2 * float64(bucketSize) / accuracy)))
+	if fingerPrintLength < 1 {
+		fingerPrintLength = 1
+	}
+	bucketCount := nextPower(itemCount * 100 / (bucketSize * lf))
 	buckets := make([]bucket, bucketCount)
-	for i := uint(0); i < bucketCount; i++ {
+	for i := uint64(0); i < bucketCount; i++ {
 		buckets[i] = make(bucket, bucketSize)
 	}
+
+	maxRetries := int(10*math.Log2(float64(itemCount))) + 1
 	return &Cuckoo{
 		buckets:           buckets,
-		bucketCount:       bucketCount,
-		bucketSize:        bucketSize,
-		fingerPrintLength: f,
-		maxRetries:        int(10*math.Log2(float64(itemCount))) + 1,
+		BucketCount:       bucketCount,
+		BucketSize:        bucketSize,
+		FingerPrintLength: fingerPrintLength, // in bits
+		MaxRetries:        maxRetries,
 	}
 }
 
-func (c *Cuckoo) hashes(data string) (uint, uint, fingerprint) {
+func (c *Cuckoo) hashes(data string) (uint64, uint64, fingerprint) {
 	h := hash([]byte(data))
-	f := h[0:c.fingerPrintLength]
-	i1 := uint(binary.BigEndian.Uint32(h))
-	i2 := i1 ^ uint(binary.BigEndian.Uint32(hash(f)))
+	f := fingerprintBits(h, c.FingerPrintLength)
+	i1 := uint64(binary.BigEndian.Uint32(h))
+	i2 := i1 ^ uint64(binary.BigEndian.Uint32(hash(f)))
 	return i1, i2, fingerprint(f)
 }
 
@@ -92,44 +102,46 @@ func hash(data []byte) []byte {
 	return hash
 }
 
-func (c *Cuckoo) Set(data string) {
+func (c *Cuckoo) Set(data string) error {
 	i1, i2, f := c.hashes(data)
-	b1 := c.buckets[i1%c.bucketCount]
+	mask := c.BucketCount - 1
+	b1 := c.buckets[i1&mask]
 	if i, err := b1.nextIndex(); err == nil {
 		b1[i] = f
-		return
+		return nil
 	}
 
-	b2 := c.buckets[i2%c.bucketCount]
+	b2 := c.buckets[i2&mask]
 	if i, err := b2.nextIndex(); err == nil {
 		b2[i] = f
-		return
+		return nil
 	}
 
 	i := i1
-	for r := 0; r < c.maxRetries; r++ {
-		index := i % c.bucketCount
-		entryIndex := rand.Intn(int(c.bucketSize))
+	for r := 0; r < c.MaxRetries; r++ {
+		index := i % c.BucketCount
+		entryIndex := rand.Intn(int(c.BucketSize))
 		f, c.buckets[index][entryIndex] = c.buckets[index][entryIndex], f
-		i = i ^ uint(binary.BigEndian.Uint32(hash(f)))
-		b := c.buckets[i%c.bucketCount]
+		i = i ^ uint64(binary.BigEndian.Uint32(hash(f)))
+		b := c.buckets[i&mask]
 		if idx, err := b.nextIndex(); err == nil {
 			b[idx] = f
-			return
+			return nil
 		}
 	}
-	panic("cuckoo filter full")
+	return errors.New("Cuckoo filter full")
 }
 
 func (c *Cuckoo) Del(needle string) {
 	i1, i2, f := c.hashes(needle)
-	b1 := c.buckets[i1%c.bucketCount]
+	mask := c.BucketCount - 1
+	b1 := c.buckets[i1&mask]
 	if ind, ok := b1.contains(f); ok {
 		b1[ind] = nil
 		return
 	}
 
-	b2 := c.buckets[i2%c.bucketCount]
+	b2 := c.buckets[i2&mask]
 	if ind, ok := b2.contains(f); ok {
 		b2[ind] = nil
 		return
@@ -138,7 +150,21 @@ func (c *Cuckoo) Del(needle string) {
 
 func (c *Cuckoo) Get(needle string) bool {
 	i1, i2, f := c.hashes(needle)
-	_, b1 := c.buckets[i1%c.bucketCount].contains(f)
-	_, b2 := c.buckets[i2%c.bucketCount].contains(f)
+	mask := c.BucketCount - 1
+	_, b1 := c.buckets[i1&mask].contains(f)
+	_, b2 := c.buckets[i2&mask].contains(f)
 	return b1 || b2
+}
+
+func fingerprintBits(hash []byte, bitLen uint64) []byte {
+	byteLen := (bitLen + 7) / 8
+	fp := make([]byte, byteLen)
+	copy(fp, hash[:byteLen])
+
+	// Zero out excess bits in the last byte
+	excessBits := (8 * byteLen) - bitLen
+	if excessBits > 0 {
+		fp[byteLen-1] &= (1 << (8 - excessBits)) - 1
+	}
+	return fp
 }
