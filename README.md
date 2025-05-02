@@ -1,69 +1,63 @@
-This project implements a Cuckoo Filter, inspired by the paper 'Cuckoo Filter: Practically Better Than Bloom' (Bin Fan, David G. Andersen, Michael Kaminsky, CoNEXT 2014).
-https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf
-- adavantage:
-    - support add and remove item dynamically
-    - higher lookup perfromance than traditional bloom, even in 95% full
-    - easier to implement than other bloom filter varian that support deletion
-    - use less space than bloom when FPR required <3%>
-- cuckoo filter is variant of cuckoo hash table
-- cuckoo hash table:
-    - use 2 or more hash function
-    - each key can be placed in 1 out of 2 possible locations
-        - locations calcultaed using hash function
-    - when insert:
-        - if both location full, kick out existing key from 1 of the location
-            - each bucket may hold>1 key
-        - evicted key then insert into another location
-        - may cause chain eviction. ( like cuckoo bird kick out eggs )
-            - until vacant bucket found, or when maximum is reached
-            - if no vacant, hash table can be considered as too full
-        - average insertion time is O(1)
-    - advantage
-        - high load factor (90%) before performance degrade
-            - by refines earlier item placement decisions
-        - fast lookup: need only check 2 place
-        - simple and predictable perfromance, at most 2 lookup
-    - when lookup:
-        - compute key from hash function
-        - go to the 2 buckets and compare the full key
-- Fingerprint size determined by target False Positive Rate (FPR) 
-    - smaller FPR need longer fingerprint size
-    - minimum fingerprin size used grow logarithmically with number of entries in table
-        - so per item overhead higher for large table (> billion), but with lower FPR
-    - for < billion, cuckoo use less space & support deletion than bloom filter, ( when FPR < 3%)
-- cuckoo filter only store fingerprint, not full key
-    - so cannot perform standard cuckoo hashing to insert new item
-- when insert:
-    - use partial-key cuckoo hashing to derive item's alternate location based on fingerprint
-        - f = fingerprint(x)
-        - h1(x) = hash(x)
-        - h2(x) = h1(x) ⊕ hash(fingerprint)
-    - the use of XOR (⊕), ensure that h1(x) can be caluclate from h2(x)
-        - h1(x) = h2(x) ⊕ hash(fingerprint)
-        - XOR is self-inverse!
-    - fingerprint is hashed before XOR to help distribute item uniformly
-        - if not hashed, as the fingerprint is usualy small ( as we need to save it in bucket), when we XOR it with h1(x), only last few bits change and h2(x) will be very close to h1(x), which may expect more collisions
-- when lookup
-    - compute f=fingerprint(x)
-    - calculate h1(x) and h2(x), if either f in either, then return true
-    - ensure no false negative as long as no bucket overflow
-- when delete:
-    - check if h1(x) or h2(x) bucket with fingerprint
-    - remove fingerprint from bucket
-    - no Flase deletion
-        - f(y)==f(x), and ha(y)==ha(x), then must be hb(y)==hb(x)
-        - so if we want to remove x, it can be removed from ha or hb
-        - and the other will be ther for y
-        - but FPR unchanged after remove, as loookup(x) will be still true
-        - expected FP that bounded by FPR
+# Cuckoo Filter in Go
+[![Go Version](https://img.shields.io/badge/Go-1.22%2B-blue)](https://golang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)  
+This project implements a [Cuckoo Filter](https://www.pdl.cmu.edu/PDL-FTP/FS/cuckoo-conext2014.pdf), inspired by the paper *"Cuckoo Filter: Practically Better Than Bloom"* by Bin Fan, David G. Andersen, and Michael Kaminsky (CoNEXT 2014).
 
-- formula
-### Bucket Size  
+## What is a Cuckoo Filter?
+
+A Cuckoo Filter is a probabilistic data structure used for set membership tests, similar to a Bloom Filter—but with added support for deletions, better lookup performance, and improved space efficiency when the desired false positive rate (FPR) is under 3%.
+
+Instead of storing the full item, it stores a short fingerprint of each item in one of two possible buckets. Like Cuckoo Hashing, it may relocate existing entries to make space for new ones.
+
+
+## Advantages
+
+- Supports **dynamic add and delete** operations.
+- **Faster lookups** than Bloom Filters, even at 95% capacity.
+- **Simpler to implement** than Bloom Filter variants that support deletion.
+- **More space-efficient** than Bloom Filters when FPR < 3%.
+
+
+## Theory
+
+### Cuckoo Hash Table Basics
+
+- Uses 1 hash functions.
+- Each item has **two candidate buckets**: `h1(x)` and `h2(x) = h1(x) ⊕ hash(fingerprint(x))`.
+- If both buckets are full, evict an existing item (Cuckooing), and recursively reinsert the evicted one.
+- Each bucket may store multiple entries (typically 2–8).
+- Average insertion time is **O(1)**.
+
+### Fingerprint Storage
+
+- Only stores a short **fingerprint** of each item.
+- Fingerprint size is based on the **desired false positive rate (ε)**.
+- Insertion uses **partial-key Cuckoo hashing**, relying only on the fingerprint.
+
+### Lookup
+
+- Compute fingerprint `f = fingerprint(x)`.
+- Check if `f` exists in either `h1(x)` or `h2(x)`.
+- Guarantees **no false negatives** unless an insertion failed due to full capacity.
+
+### Deletion
+
+- Check both buckets for the fingerprint.
+- Remove it if found.
+- No risk of **false deletion**:
+  - If multiple items share a fingerprint, their alternate bucket will still retain one valid copy.
+  - **FPR remains unchanged** after deletion.
+
+
+## Formulas Used
+
+### Bucket Size
+
 $$
-b =2,4,8
-$$  
-- smaller: faster lookup ( speed)
-- larger: higher load factor (space)
+b = 2, 4, 8
+$$
+- Smaller `b` → faster lookup.
+- Larger `b` → higher load factor (more space efficiency).
 
 ### Minimum Fingerprint Length
 $$
@@ -72,18 +66,43 @@ $$
 
 - `ε`: false positive rate
 - `b`: bucket size
+- `f`: bits per fingerprint
 
 ### Number of Bucket
 $$
 m= \left\lceil \frac{n}{\alpha \cdot b} \right\rceil
 $$
 - `n`: number of items
-- `α`: Load factor
+- `α`: expected load factor (e.g. 0.84 for b=4)
 - `b`: bucket size
-- usually round up to power of 2 for fast modulo operatios using bit mask
+- Round `m` up to the next power of 2 for fast modulo operations using bit masking.
 
-### Retry Limit
+### Maximum Retry Limit
 $$
-\text{max\_retries}=10\times\log_2(n)
+\text{max\_retries}=10\cdot\log_2(n)
 $$
 - `n`: number of items
+- Used to cap the number of relocation attempts during insertion.
+
+## Example Usage
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/wongzc/go-cuckoo-filter/cuckoofilter"
+)
+
+func main() {
+    cf := cuckoofilter.New(1000, 0.01, 4)
+
+    cf.Set("hello")
+
+    fmt.Println(cf.Get("hello")) // true
+    fmt.Println(cf.Get("world")) // probably false
+
+    cf.Del("hello")
+    fmt.Println(cf.Get("hello")) // false
+}
+```
