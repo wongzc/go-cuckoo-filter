@@ -2,9 +2,9 @@ package cuckoofilter
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/binary"
 	"errors"
+	"github.com/cespare/xxhash/v2"
 	"math"
 	"math/rand"
 )
@@ -40,7 +40,7 @@ func (b bucket) contains(f fingerprint) (int, bool) {
 
 func nextPower(i uint64) uint64 {
 	// get min power of 2 that is larger, to use bitwise masking
-	if i==0 {
+	if i == 0 {
 		return 1
 	}
 	i--
@@ -54,8 +54,6 @@ func nextPower(i uint64) uint64 {
 	return i
 }
 
-var hasher = sha1.New()
-
 func New(itemCount uint64, accuracy float64, bucketSize uint64) *Cuckoo {
 	maxLoadFactor := map[uint64]uint64{
 		1: 50,
@@ -63,7 +61,7 @@ func New(itemCount uint64, accuracy float64, bucketSize uint64) *Cuckoo {
 		4: 95,
 		8: 98,
 	} // max load factor under each bucket size by Fan et al.
-	lf,ok := maxLoadFactor[bucketSize]
+	lf, ok := maxLoadFactor[bucketSize]
 	if !ok {
 		panic("unsupported bucket size, use 1, 2, 4, or 8")
 	}
@@ -90,16 +88,13 @@ func New(itemCount uint64, accuracy float64, bucketSize uint64) *Cuckoo {
 func (c *Cuckoo) hashes(data string) (uint64, uint64, fingerprint) {
 	h := hash([]byte(data))
 	f := fingerprintBits(h, c.FingerPrintLength)
-	i1 := uint64(binary.BigEndian.Uint32(h))
-	i2 := i1 ^ uint64(binary.BigEndian.Uint32(hash(f)))
+	i1 := h
+	i2 := i1 ^ hash(f)
 	return i1, i2, fingerprint(f)
 }
 
-func hash(data []byte) []byte {
-	hasher.Write([]byte(data))
-	hash := hasher.Sum(nil)
-	hasher.Reset()
-	return hash
+func hash(data []byte) uint64 {
+	return xxhash.Sum64(data)
 }
 
 func (c *Cuckoo) Set(data string) error {
@@ -122,7 +117,7 @@ func (c *Cuckoo) Set(data string) error {
 		index := i % c.BucketCount
 		entryIndex := rand.Intn(int(c.BucketSize))
 		f, c.buckets[index][entryIndex] = c.buckets[index][entryIndex], f
-		i = i ^ uint64(binary.BigEndian.Uint32(hash(f)))
+		i = i ^ hash(f)
 		b := c.buckets[i&mask]
 		if idx, err := b.nextIndex(); err == nil {
 			b[idx] = f
@@ -156,15 +151,30 @@ func (c *Cuckoo) Get(needle string) bool {
 	return b1 || b2
 }
 
-func fingerprintBits(hash []byte, bitLen uint64) []byte {
+func fingerprintBits(h uint64, bitLen uint64) []byte {
 	byteLen := (bitLen + 7) / 8
+	full := make([]byte, 8)
+	binary.BigEndian.PutUint64(full, h)
+
 	fp := make([]byte, byteLen)
-	copy(fp, hash[:byteLen])
+	copy(fp, full[:byteLen])
 
 	// Zero out excess bits in the last byte
 	excessBits := (8 * byteLen) - bitLen
 	if excessBits > 0 {
 		fp[byteLen-1] &= (1 << (8 - excessBits)) - 1
 	}
+
+	allZero := true
+	for _, b := range fp {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero { // ensure it is not 0, else maybe deemed as empty
+		fp[0] = 1
+	}
+
 	return fp
 }
